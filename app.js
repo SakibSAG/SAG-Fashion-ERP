@@ -39,7 +39,7 @@ function showStatus(message, isError = false) {
   }
 }
 
-// Google Sheets-এ ডাটা সেভ করার উপায়
+// Google Sheets-এ ডাটা সেভ করার নিরাপদ উপায়
 function saveToGoogleSheet() {
   showStatus("Saving to Google Sheets...");
   return new Promise((resolve) => {
@@ -81,11 +81,18 @@ function saveToGoogleSheet() {
   });
 }
 
-// JSONP Callback - গুগল শিট থেকে ডাটা লোড হওয়ার পর
+// JSONP Callback - নিরাপদ পার্সার হ্যান্ডলার
 window.handleSheetDataResponse = function(textData) {
-  if (textData && String(textData).trim() !== "") {
+  if (textData && String(textData).trim() !== "" && String(textData) !== "null" && String(textData) !== "undefined") {
     try {
-      const parsed = typeof textData === "string" ? JSON.parse(textData) : textData;
+      let parsed = textData;
+      if (typeof textData === "string") {
+        // Double parsing stringified JSON
+        parsed = JSON.parse(textData);
+        if (typeof parsed === "string") {
+          parsed = JSON.parse(parsed);
+        }
+      }
       D = normalizeRestoredERP(parsed);
       postLoadProcess();
       showStatus("Data Loaded Successfully!");
@@ -93,14 +100,20 @@ window.handleSheetDataResponse = function(textData) {
       go(curr.page, curr.sub);
     } catch (e) {
       console.error("JSON Parse Error:", e);
-      showStatus("Data Format Error!", true);
+      D = createEmptyDataStructure();
+      postLoadProcess();
+      showStatus("Resetting Corrupted Data... Ready!", true);
+      const curr = getPageState();
+      go(curr.page, curr.sub);
     }
   } else {
-    showStatus("Google Sheet is empty.");
+    D = createEmptyDataStructure();
+    postLoadProcess();
+    showStatus("Google Sheet is empty. Ready for new entries.");
   }
 };
 
-// Google Sheets থেকে ডাটা লোড (JSONP)
+// Google Sheets থেকে ডাটা লোড
 function loadFromGoogleSheet() {
   showStatus("Loading data from Google Sheets...");
   const oldScript = document.getElementById("jsonpScript");
@@ -440,7 +453,6 @@ document.addEventListener("click",e=>{
  if(delBtn){delRow(delBtn.dataset.key,delBtn.dataset.id);return}
 });
 
-// 📌 Corrected Stock Receive & Delivery Definitions (Matching Entry Options Exact Strings)
 const STOCK_RECEIVE={
  raw:new Set(["RAW YARN RECEIVED FROM SPINNING","RAW YARN RETURN FROM DYEING","RAW YARN RETURN FROM KNITTING","RAW YARN RETURN FROM RE-CONNING"]),
  dyed:new Set(["DYED YARN RECEIVED FROM DYEING","DYED YARN RETURN FROM KNITTING","DYED YARN RETURN FROM RE-CONNING"]),
