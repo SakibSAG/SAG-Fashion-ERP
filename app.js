@@ -1,8 +1,8 @@
 const ERP_PASSWORD = "Sakib";
 const ERP_AUTH = "YARN_ERP_AUTH";
 
-// আপনার কপি করা Google Apps Script-এর Web App URL
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzMNWCvOODQM9si4Lkw4zWUbEaoSgjMpKzYE5vCsAV6wU2kL5dO3DpoHwK8H8yKUrYwpw/exec";
+// আপনার নতুন Google Apps Script Web App URL
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwP33IfNjWQJMVDBtwJGbTLbTSotXYmrbzg--AJFAM0EA3NWyCNEaJJ7qDVzJOp3Cfqgw/exec";
 
 function requirePassword(){
   if(sessionStorage.getItem(ERP_AUTH)==="1") return true;
@@ -39,7 +39,7 @@ function showStatus(message, isError = false) {
   }
 }
 
-// Save Data to Google Sheet
+// Google Sheets-এ ডাটা সেভ করার ফাংশন (POST)
 async function saveToGoogleSheet() {
   showStatus("Saving to Google Sheets...");
   try {
@@ -62,26 +62,38 @@ async function saveToGoogleSheet() {
   }
 }
 
-// Load Data from Google Sheet
-async function loadFromGoogleSheet() {
-  showStatus("Loading data from Google Sheets...");
-  try {
-    const response = await fetch(APPS_SCRIPT_URL);
-    const textData = await response.text();
-    if (textData && textData.trim() !== "") {
-      const parsed = JSON.parse(textData);
+// JSONP Callback - গুগল শিট থেকে ডাটা লোড হওয়ার পর এক্সিকিউট হবে
+window.handleSheetDataResponse = function(textData) {
+  if (textData && String(textData).trim() !== "") {
+    try {
+      const parsed = typeof textData === "string" ? JSON.parse(textData) : textData;
       D = normalizeRestoredERP(parsed);
       postLoadProcess();
       showStatus("Data Loaded Successfully!");
       const curr = getPageState();
       go(curr.page, curr.sub);
-    } else {
-      showStatus("Google Sheet Ready.");
+    } catch (e) {
+      console.error("JSON Parse Error:", e);
+      showStatus("Data Format Error!", true);
     }
-  } catch (err) {
-    console.error("Load Error:", err);
-    showStatus("Load Failed!", true);
+  } else {
+    showStatus("Google Sheet is empty.");
   }
+};
+
+// Google Sheets থেকে ডাটা লোড করার রিলায়েবল উপায় (JSONP)
+function loadFromGoogleSheet() {
+  showStatus("Loading data from Google Sheets...");
+  const oldScript = document.getElementById("jsonpScript");
+  if (oldScript) oldScript.remove();
+
+  const script = document.createElement("script");
+  script.id = "jsonpScript";
+  script.src = APPS_SCRIPT_URL + "?callback=handleSheetDataResponse&ts=" + Date.now();
+  script.onerror = function() {
+    showStatus("Failed to connect Google Sheets!", true);
+  };
+  document.body.appendChild(script);
 }
 
 async function save() {
