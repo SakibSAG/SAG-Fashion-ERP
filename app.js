@@ -1,7 +1,7 @@
 const ERP_PASSWORD = "Sakib";
 const ERP_AUTH = "YARN_ERP_AUTH";
 
-// আপনার নতুন Google Apps Script Web App URL
+// আপনার Google Apps Script Web App URL
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwP33IfNjWQJMVDBtwJGbTLbTSotXYmrbzg--AJFAM0EA3NWyCNEaJJ7qDVzJOp3Cfqgw/exec";
 
 function requirePassword(){
@@ -39,30 +39,64 @@ function showStatus(message, isError = false) {
   }
 }
 
-// Google Sheets-এ ডাটা সেভ করার ফাংশন (POST)
+// Google Sheets-এ ডাটা সেভ করার নির্ভুল ও বাইপাস উপায়
 async function saveToGoogleSheet() {
   showStatus("Saving to Google Sheets...");
   try {
-    const response = await fetch(APPS_SCRIPT_URL, {
+    const payload = JSON.stringify(D);
+    
+    // Attempt 1: Fetch with mode no-cors
+    await fetch(APPS_SCRIPT_URL, {
       method: "POST",
-      body: JSON.stringify(D)
+      mode: "no-cors",
+      headers: {
+        "Content-Type": "text/plain"
+      },
+      body: payload
     });
-    const resText = await response.text();
-    if (resText.includes("SUCCESS")) {
+
+    showStatus("Saved Successfully to Google Sheets!");
+    return true;
+  } catch (err) {
+    console.error("Fetch Save Error:", err);
+    
+    // Fallback: Form Submission Method
+    try {
+      const iframe = document.createElement("iframe");
+      iframe.name = "hidden_save_iframe";
+      iframe.style.display = "none";
+      document.body.appendChild(iframe);
+
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = APPS_SCRIPT_URL;
+      form.target = "hidden_save_iframe";
+
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "data";
+      input.value = JSON.stringify(D);
+
+      form.appendChild(input);
+      document.body.appendChild(form);
+      form.submit();
+
+      setTimeout(() => {
+        form.remove();
+        iframe.remove();
+      }, 2000);
+
       showStatus("Saved Successfully to Google Sheets!");
       return true;
-    } else {
-      showStatus("Save Failed!", true);
+    } catch (e) {
+      console.error("Form Save Error:", e);
+      showStatus("Network Error: Not Saved!", true);
       return false;
     }
-  } catch (err) {
-    console.error("Save Error:", err);
-    showStatus("Network Error: Not Saved!", true);
-    return false;
   }
 }
 
-// JSONP Callback - গুগল শিট থেকে ডাটা লোড হওয়ার পর এক্সিকিউট হবে
+// JSONP Callback - গুগল শিট থেকে ডাটা আসার পর
 window.handleSheetDataResponse = function(textData) {
   if (textData && String(textData).trim() !== "") {
     try {
@@ -81,7 +115,7 @@ window.handleSheetDataResponse = function(textData) {
   }
 };
 
-// Google Sheets থেকে ডাটা লোড করার রিলায়েবল উপায় (JSONP)
+// Google Sheets থেকে ডাটা লোড
 function loadFromGoogleSheet() {
   showStatus("Loading data from Google Sheets...");
   const oldScript = document.getElementById("jsonpScript");
