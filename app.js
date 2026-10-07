@@ -1,7 +1,7 @@
 const ERP_PASSWORD = "Sakib";
 const ERP_AUTH = "YARN_ERP_AUTH";
 
-// আপনার নির্দিষ্ট Google Spreadsheet ID
+// আপনার Google Spreadsheet ID
 const SPREADSHEET_ID = "1nxyl3IOMQhc7ZKTiggZTQeNXV4DtqiBtkBuF7YKQdc8";
 
 // আপনার Google Client ID
@@ -30,7 +30,6 @@ function createEmptyDataStructure() {
 let D = createEmptyDataStructure();
 let edit = {};
 
-// UI Status Message
 function showStatus(message, isError = false) {
   let statusDiv = document.getElementById("erpStatus");
   if (!statusDiv) {
@@ -42,34 +41,36 @@ function showStatus(message, isError = false) {
   statusDiv.style.background = isError ? "#ef4444" : "#0284c7";
   statusDiv.style.display = "block";
   statusDiv.textContent = message;
-  if (!isError && (message.includes("Success") || message.includes("Loaded"))) {
+  if (!isError && (message.includes("Success") || message.includes("Loaded") || message.includes("Synced"))) {
     setTimeout(() => { statusDiv.style.display = "none"; }, 3000);
   }
 }
 
-// Google Auth Init
 function initGoogleAuth() {
   if (typeof google !== "undefined" && google.accounts) {
-    tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID,
-      scope: SCOPES,
-      callback: async (tokenResponse) => {
-        if (tokenResponse.access_token) {
-          accessToken = tokenResponse.access_token;
-          showStatus("Google Sheets Connected! Syncing data...");
-          await loadFromGoogleSheet();
-        } else {
-          showStatus("Google Auth Permission Pending", true);
-        }
-      },
-    });
-    tokenClient.requestAccessToken({ prompt: '' });
+    try {
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: SCOPES,
+        callback: async (tokenResponse) => {
+          if (tokenResponse.access_token) {
+            accessToken = tokenResponse.access_token;
+            showStatus("Google Sheets Connected! Syncing data...");
+            await loadFromGoogleSheet();
+          } else {
+            showStatus("Google Auth Permission Pending", true);
+          }
+        },
+      });
+      tokenClient.requestAccessToken({ prompt: '' });
+    } catch(e) {
+      console.error("Google Auth Init Error:", e);
+    }
   } else {
     setTimeout(initGoogleAuth, 500);
   }
 }
 
-// Load Data from Google Sheet
 async function loadFromGoogleSheet() {
   try {
     const readUrl = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/ERP_DATA!A2`;
@@ -85,15 +86,14 @@ async function loadFromGoogleSheet() {
       const curr = getPageState();
       go(curr.page, curr.sub);
     } else {
-      showStatus("Google Sheet is empty. Ready for new entries.");
+      showStatus("Google Sheet ready for entries.");
     }
   } catch (err) {
     console.error("Error loading data from Google Sheet:", err);
-    showStatus("Cloud load failed! Local state active.", true);
+    showStatus("Cloud load failed! Using local mode.", true);
   }
 }
 
-// Save Data to Google Sheet
 async function saveToGoogleSheet() {
   if (!accessToken) {
     showStatus("Connecting Google Auth...", true);
@@ -173,8 +173,15 @@ const nav=[
 function titleCaseText(v){return String(v??"").toLowerCase().replace(/(^|[\s\-\/()]+)([a-z])/g,(m,p,c)=>p+c.toUpperCase())}
 
 function postLoadProcess(){
- D.raw??=[];D.dyed??=[];D.grey??=[];D.reqDyeing??=[];D.reqKnitting??=[];D.loose??=[];
- if(!D.additional || Array.isArray(D.additional) || typeof D.additional !== "object"){
+ if(!D || typeof D !== "object") D = createEmptyDataStructure();
+ D.raw = Array.isArray(D.raw) ? D.raw : [];
+ D.dyed = Array.isArray(D.dyed) ? D.dyed : [];
+ D.grey = Array.isArray(D.grey) ? D.grey : [];
+ D.reqDyeing = Array.isArray(D.reqDyeing) ? D.reqDyeing : [];
+ D.reqKnitting = Array.isArray(D.reqKnitting) ? D.reqKnitting : [];
+ D.loose = Array.isArray(D.loose) ? D.loose : [];
+
+ if(!D.additional || typeof D.additional !== "object" || Array.isArray(D.additional)){
   D.additional = {};
  }
  ADDITIONAL_FIELDS.forEach(k => {
@@ -192,20 +199,21 @@ function N(x){return Number(x||0)}
 
 function allTextValues(field){
  const vals=[];
- if(D.additional && D.additional[field] && Array.isArray(D.additional[field])) {
+ if(D && D.additional && D.additional[field] && Array.isArray(D.additional[field])) {
    vals.push(...D.additional[field]);
  }
  return [...new Set(vals.map(titleCaseText).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
 }
 
 function additionalOptionRows(field){
- const vals=(D.additional && Array.isArray(D.additional[field]))?[...D.additional[field]].reverse():[];
+ const vals=(D && D.additional && Array.isArray(D.additional[field]))?[...D.additional[field]].reverse():[];
  return vals.map(v=>'<div class="savedOption"><span>'+esc(v)+'</span><button class="btn del" data-afield="'+field+'" data-avalue="'+encodeURIComponent(v)+'">Delete</button></div>').join("")||'<div class="empty">No Saved Values.</div>';
 }
 
 function additionalInfo(){
  const labels={proformaInvoice:"Proforma Invoice",sourceBuyer:"Source Buyer",sourceOrder:"Source Order",buyer:"Buyer",order:"Order",customer:"Customer",yarnBrand:"Yarn Brand",lot:"Lot",count:"Count",fiver:"Fiver",blandRatio:"Bland Ratios",quality:"Quality",color:"Colour",workOrder:"Work Order",dyeingFactory:"Dyeing Factory",batch:"Batch",yknc:"YKNC",knittingFactory:"Knitting Factory",fabrication:"Fabrication",gsm:"GSM",mcD:"MC / D",fd:"F / D"};
  const content = document.getElementById("content");
+ if(!content) return;
  content.innerHTML='<div class="panel additionalPanel"><h2>Additional Info</h2><div class="additionalGrid">'+
  ADDITIONAL_FIELDS.map(k=>'<div class="additionalCard"><label>'+labels[k]+'</label><div class="additionalInputRow"><input type="text" id="add_'+k+'" autocomplete="off" placeholder="Enter '+labels[k]+'"><button class="btn addInfoBtn" data-addfield="'+k+'">Save</button></div><div class="additionalTools"><input class="additionalSearch" data-searchfield="'+k+'" placeholder="Search..." autocomplete="off"><button class="btn exportBtn additionalExport" data-exportfield="'+k+'">Download Excel</button></div><div class="savedOptions" id="saved_'+k+'">'+additionalOptionRows(k)+'</div></div>').join("")+'</div>';
  
@@ -230,7 +238,7 @@ function additionalInfo(){
    D.additional[k] = [...new Set(D.additional[k])];
    
    await save();
-   input.value = "";
+   if(input) input.value = "";
    additionalInfo();
   };
  });
@@ -284,7 +292,7 @@ function normalizeRestoredERP(value){
  const out=JSON.parse(JSON.stringify(value));
  ["raw","dyed","grey","loose","reqDyeing","reqKnitting"].forEach(k=>{if(!Array.isArray(out[k]))out[k]=[]});
  out.additional=normalizeAdditionalData(out.additional);
- out.loose.forEach(r=>{r.category="Loose Yarn"});
+ if(Array.isArray(out.loose)) out.loose.forEach(r=>{r.category="Loose Yarn"});
  return out;
 }
 
@@ -301,7 +309,7 @@ function getPageState(){
 function go(p,sub=""){
  setPageState(p,sub); 
  const titleElem = document.getElementById("title");
- if(titleElem) titleElem.textContent=titles[p];
+ if(titleElem) titleElem.textContent=titles[p] || "Dashboard";
  if(p==="dashboard")dash(); 
  else if(p==="additional")additionalInfo(); 
  else if(["raw","dyed","grey","loose","reqDyeing","reqKnitting"].includes(p))entry(p);
@@ -310,7 +318,6 @@ function go(p,sub=""){
  else statementMenu(sub);
 }
 
-// Render Navigation Bar Items
 function renderNav() {
  const navContainer = document.getElementById("nav");
  if(!navContainer) return;
@@ -324,23 +331,26 @@ function renderNav() {
 }
 
 function entry(t){
- let fs=F[t];
+ let fs=F[t] || [];
  const content = document.getElementById("content");
+ if(!content) return;
  content.innerHTML='<div class="entryPage"><div class="panel entryFormPanel"><h2>'+titles[t]+'</h2>'+'<form id="f" class="form">'+fs.map(f=>'<div class="field '+(f[0]==="remarks"?"wide":"")+'"><label>'+f[1]+'</label>'+fieldHTML(f)+'</div>').join("")+'<div class="actions"><button class="btn">Save</button></div></form></div><div class="panel entryDataPanel"><div class="exportBar"><input id="entrySearch" class="tableSearch" placeholder="Search..." autocomplete="off"><button class="btn" id="entrySearchBtn">Search</button><button class="btn" id="entryClearBtn">Clear</button><button class="btn exportBtn" id="entryExport">Download Excel</button></div><div id="tbl"></div></div></div>';
  const form=document.getElementById("f");
- form.onsubmit=async e=>{
-  e.preventDefault(); let o=Object.fromEntries(new FormData(form));
-  fs.forEach(z=>{if(z[2]==="text"&&o[z[0]]!==undefined)o[z[0]]=titleCaseText(o[z[0]])});
-  if(t==="loose"){o.category="Loose Yarn";o.transaction=String(o.transaction||"").trim()}
-  const missing=fs.filter(z=>z[0]!=="remarks"&&!String(o[z[0]]??"").trim()).map(z=>z[1]);
-  if(missing.length){alert("Entry Not Saved!\n\nPlease Fill In The Following Required Field(s):\n\n"+missing.join("\n"));return}
-  if(!validateAgainstAdditionalInfo(t,o))return;
-  o.id=edit[t]||Date.now();
-  D[t]=edit[t]?D[t].map(x=>x.id==o.id?o:x):[...D[t],o]; delete edit[t]; 
-  
-  await save();
-  entry(t);
- };
+ if(form){
+   form.onsubmit=async e=>{
+    e.preventDefault(); let o=Object.fromEntries(new FormData(form));
+    fs.forEach(z=>{if(z[2]==="text"&&o[z[0]]!==undefined)o[z[0]]=titleCaseText(o[z[0]])});
+    if(t==="loose"){o.category="Loose Yarn";o.transaction=String(o.transaction||"").trim()}
+    const missing=fs.filter(z=>z[0]!=="remarks"&&!String(o[z[0]]??"").trim()).map(z=>z[1]);
+    if(missing.length){alert("Entry Not Saved!\n\nPlease Fill In The Following Required Field(s):\n\n"+missing.join("\n"));return}
+    if(!validateAgainstAdditionalInfo(t,o))return;
+    o.id=edit[t]||Date.now();
+    D[t]=edit[t]?D[t].map(x=>x.id==o.id?o:x):[...D[t],o]; delete edit[t]; 
+    
+    await save();
+    entry(t);
+   };
+ }
  renderTable(t);
 }
 
@@ -357,11 +367,16 @@ function fieldHTML(f){
 }
 
 function renderTable(t){
- let fs=F[t],qi=fs.findIndex(f=>f[0]==="quantity");
+ let fs=F[t] || [],qi=fs.findIndex(f=>f[0]==="quantity");
  const tbl = document.getElementById("tbl");
  if(!tbl) return;
- tbl.innerHTML='<div class="tableWrap dataScroll"><table id="entryTable"><thead><tr>'+fs.map(f=>'<th>'+titleCaseText(f[1])+'</th>').join("")+'<th>Actions</th></tr></thead><tbody>'+[...D[t]].reverse().map(r=>'<tr>'+fs.map(f=>'<td>'+esc(f[0]==="quantity"?formatQty(r[f[0]]):r[f[0]])+'</td>').join("")+'<td><button type="button" class="btn rowEdit" data-key="'+esc(t)+'" data-id="'+esc(String(r.id))+'">Edit</button> <button type="button" class="btn del rowDelete" data-key="'+esc(t)+'" data-id="'+esc(String(r.id))+'">Delete</button></td></tr>').join("")+'</tbody><tfoot><tr class="subtotalRow">'+fs.map((f,i)=>'<td data-subtotal-col="'+i+'">'+(i===0?"Subtotal":(i===qi?"0.00":""))+'</td>').join("")+'<td></td></tr></tfoot></table></div>';
- document.getElementById("entryTable").dataset.subtotalCols=String(qi); updateTableSubtotals("entryTable",[qi]);
+ const list = Array.isArray(D[t]) ? D[t] : [];
+ tbl.innerHTML='<div class="tableWrap dataScroll"><table id="entryTable"><thead><tr>'+fs.map(f=>'<th>'+titleCaseText(f[1])+'</th>').join("")+'<th>Actions</th></tr></thead><tbody>'+[...list].reverse().map(r=>'<tr>'+fs.map(f=>'<td>'+esc(f[0]==="quantity"?formatQty(r[f[0]]):r[f[0]])+'</td>').join("")+'<td><button type="button" class="btn rowEdit" data-key="'+esc(t)+'" data-id="'+esc(String(r.id))+'">Edit</button> <button type="button" class="btn del rowDelete" data-key="'+esc(t)+'" data-id="'+esc(String(r.id))+'">Delete</button></td></tr>').join("")+'</tbody><tfoot><tr class="subtotalRow">'+fs.map((f,i)=>'<td data-subtotal-col="'+i+'">'+(i===0?"Subtotal":(i===qi?"0.00":""))+'</td>').join("")+'<td></td></tr></tfoot></table></div>';
+ const entryTable = document.getElementById("entryTable");
+ if(entryTable) {
+   entryTable.dataset.subtotalCols=String(qi); 
+   updateTableSubtotals("entryTable",[qi]);
+ }
 }
 
 function formatQty(x){const n=Number(x);return Number.isFinite(n)?n.toFixed(2):"0.00"}
@@ -393,7 +408,7 @@ const STOCK_DELIVERY={
  grey:new Set(["GREY FABRICS DELIVERY TO KNITTING","GREY FABRICS DELIVERY TO DYEING","GREY FABRIC SALE"]),
  loose:new Set(["LOOSE YARN SALE"])
 };
-function stockType(t,tr){const x=String(tr||"").trim().toUpperCase();if(STOCK_RECEIVE[t].has(x))return "received";if(STOCK_DELIVERY[t].has(x))return "delivered";return ""}
+function stockType(t,tr){const x=String(tr||"").trim().toUpperCase();if(STOCK_RECEIVE[t] && STOCK_RECEIVE[t].has(x))return "received";if(STOCK_DELIVERY[t] && STOCK_DELIVERY[t].has(x))return "delivered";return ""}
 function stockFields(t){
  if(t==="raw")return ["category","proformaInvoice","sourceBuyer","sourceOrder","yarnBrand","lot","count","fiver","blandRatio","quality","color"];
  if(t==="dyed")return ["category","workOrder","buyer","order","dyeingFactory","batch","count","fiver","blandRatio","quality","color"];
@@ -408,15 +423,16 @@ function primaryReceivedTransaction(t){
 }
 function groups(t){
  const fs=stockFields(t),m={},primaryReceive=primaryReceivedTransaction(t);
- D[t].forEach(r=>{
+ const list = Array.isArray(D[t]) ? D[t] : [];
+ list.forEach(r=>{
   const typ=stockType(t,r.transaction);if(!typ)return;
   const tr=String(r.transaction||"").trim().toUpperCase(),k=fs.map(x=>String(r[x]??"").trim().toLowerCase()).join("|");
   if(!m[k])m[k]={r:{...r},received:0,delivery:0,returnQty:0,receivedDate:""};
-  if(STOCK_RECEIVE[t].has(tr)){
+  if(STOCK_RECEIVE[t] && STOCK_RECEIVE[t].has(tr)){
    if(tr===primaryReceive){const d=String(r.date??"").trim();if(d&&(!m[k].receivedDate||d<m[k].receivedDate))m[k].receivedDate=d;m[k].received+=N(r.quantity)}
    else if(tr.includes("RETURN FROM"))m[k].returnQty+=N(r.quantity);
    else m[k].received+=N(r.quantity);
-  }else if(STOCK_DELIVERY[t].has(tr))m[k].delivery+=N(r.quantity);
+  }else if(STOCK_DELIVERY[t] && STOCK_DELIVERY[t].has(tr))m[k].delivery+=N(r.quantity);
  });
  return Object.values(m).map(x=>({...x,r:{...x.r,receivedDate:x.receivedDate},balance:x.received+x.returnQty-x.delivery}));
 }
@@ -426,11 +442,13 @@ function dash(){
  const rawGroups=groups("raw"),rawTotal=rawGroups.reduce((a,z)=>a+z.balance,0);
  const rawCats=["Grey Yarn","Lycra Yarn","Polyester Yarn"].map(cat=>{const total=rawGroups.filter(z=>String(z.r.category||"").trim().toLowerCase()===cat.toLowerCase()).reduce((a,z)=>a+z.balance,0);return '<div class="rawCategoryStock"><span>'+cat+'</span><strong>'+total.toFixed(2)+'</strong></div>'}).join("");
  const content = document.getElementById("content");
+ if(!content) return;
  content.innerHTML='<div class="cards"><div class="card rawStockCard" onclick="go(\'stock\',\'raw\')"><b>Raw Yarn Stock</b><strong>'+rawTotal.toFixed(2)+' KG</strong><div class="rawCategoryList">'+rawCats+'</div></div>'+cards.slice(1).map(x=>'<div class="card" onclick="go(\'stock\',\''+x[1]+'\')"><b>'+x[0]+'</b><strong>'+groups(x[1]).reduce((a,z)=>a+z.balance,0).toFixed(2)+' KG</strong></div>').join("")+'</div>';
 }
 
 function stockMenu(){
  const content = document.getElementById("content");
+ if(!content) return;
  content.innerHTML='<div class="choices"><button class="choice" onclick="go(\'stock\',\'raw\')">Raw Yarn Stock</button><button class="choice" onclick="go(\'stock\',\'dyed\')">Dyed Yarn Stock</button><button class="choice" onclick="go(\'stock\',\'grey\')">Grey Fabrics Stock</button><button class="choice" onclick="go(\'stock\',\'loose\')">Loose Yarn Stock</button></div><div class="panel" id="sv">Select Stock.</div>';
 }
 
@@ -440,22 +458,26 @@ function stock(t){
  const sv = document.getElementById("sv");
  if(!sv) return;
  sv.innerHTML='<div class="exportBar"><input id="stockSearch" class="tableSearch" placeholder="Search..." autocomplete="off"><button class="btn" id="stockSearchBtn">Search</button><button class="btn" id="stockClearBtn">Clear</button><button class="btn exportBtn" id="stockExport">Download Excel</button></div><h2>'+title+'</h2><div class="tableWrap dataScroll"><table id="stockTable"><thead><tr><th>Received Date</th>'+fs.map(x=>'<th>'+titleCaseText(x)+'</th>').join("")+'<th>Total Received</th><th>Total Delivery</th><th>Balance</th></tr></thead><tbody>'+rs.map(x=>'<tr><td>'+esc(x.receivedDate||"")+'</td>'+fs.map(k=>'<td>'+esc(x.r[k])+'</td>').join("")+'<td>'+formatQty(x.received)+'</td><td>'+formatQty(x.delivery)+'</td><td>'+formatQty(x.balance)+'</td></tr>').join("")+'</tbody><tfoot><tr class="subtotalRow"><td>Subtotal</td>'+fs.map(()=>'<td></td>').join("")+'<td data-subtotal-col="'+(fs.length+1)+'">0.00</td><td data-subtotal-col="'+(fs.length+2)+'">0.00</td><td data-subtotal-col="'+(fs.length+3)+'">0.00</td></tr></tfoot></table></div>';
- document.getElementById("stockTable").dataset.subtotalCols=[fs.length+1,fs.length+2,fs.length+3].join(",");
- updateTableSubtotals("stockTable",[fs.length+1,fs.length+2,fs.length+3]);
+ const stockTable = document.getElementById("stockTable");
+ if(stockTable){
+   stockTable.dataset.subtotalCols=[fs.length+1,fs.length+2,fs.length+3].join(",");
+   updateTableSubtotals("stockTable",[fs.length+1,fs.length+2,fs.length+3]);
+ }
 }
 
 function statementMenu(sub=""){
  const content = document.getElementById("content");
+ if(!content) return;
  content.innerHTML='<div class="choices"><button class="choice" onclick="go(\'statements\',\'dyeing\')">Dyeing Statement</button><button class="choice" onclick="go(\'statements\',\'knitting\')">Knitting Statement</button><button class="choice" onclick="go(\'statements\',\'reqDyeing\')">Requirement Statement (Dyeing)</button><button class="choice" onclick="go(\'statements\',\'reqKnitting\')">Requirement Statement (Knitting)</button></div><div class="panel" id="st">Select Statement.</div>';
  if(sub&&["dyeing","knitting","reqDyeing","reqKnitting"].includes(sub))statement(sub);
 }
 
 function backupRestoreMenu(){
  const content = document.getElementById("content");
+ if(!content) return;
  content.innerHTML='<div class="panel"><h2>Backup & Restore</h2><div class="backupGrid"><div class="backupCard"><h3>JSON Backup / Restore</h3><button class="btn backupAction" onclick="sagFullJsonBackup()">Full JSON Backup</button> <button class="btn backupAction secondary" onclick="document.getElementById(\'sagJsonRestore\').click()">Full JSON Restore</button><input id="sagJsonRestore" type="file" accept=".json,application/json" style="display:none" onchange="sagFullJsonRestore(this)"></div></div></div>';
 }
 
-// App Load & Start
 window.addEventListener("load", () => {
   postLoadProcess();
   renderNav();
