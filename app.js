@@ -39,33 +39,19 @@ function showStatus(message, isError = false) {
   }
 }
 
-// Google Sheets-এ ডাটা সেভ করার নির্ভুল ও বাইপাস উপায়
-async function saveToGoogleSheet() {
+// Google Sheets-এ ডাটা সেভ করার নির্ভুল উপায়
+function saveToGoogleSheet() {
   showStatus("Saving to Google Sheets...");
-  try {
-    const payload = JSON.stringify(D);
-    
-    // Attempt 1: Fetch with mode no-cors
-    await fetch(APPS_SCRIPT_URL, {
-      method: "POST",
-      mode: "no-cors",
-      headers: {
-        "Content-Type": "text/plain"
-      },
-      body: payload
-    });
-
-    showStatus("Saved Successfully to Google Sheets!");
-    return true;
-  } catch (err) {
-    console.error("Fetch Save Error:", err);
-    
-    // Fallback: Form Submission Method
+  return new Promise((resolve) => {
     try {
-      const iframe = document.createElement("iframe");
-      iframe.name = "hidden_save_iframe";
-      iframe.style.display = "none";
-      document.body.appendChild(iframe);
+      let iframe = document.getElementById("hidden_save_iframe");
+      if (!iframe) {
+        iframe = document.createElement("iframe");
+        iframe.id = "hidden_save_iframe";
+        iframe.name = "hidden_save_iframe";
+        iframe.style.display = "none";
+        document.body.appendChild(iframe);
+      }
 
       const form = document.createElement("form");
       form.method = "POST";
@@ -83,20 +69,19 @@ async function saveToGoogleSheet() {
 
       setTimeout(() => {
         form.remove();
-        iframe.remove();
-      }, 2000);
+        showStatus("Saved Successfully to Google Sheets!");
+        resolve(true);
+      }, 1200);
 
-      showStatus("Saved Successfully to Google Sheets!");
-      return true;
     } catch (e) {
       console.error("Form Save Error:", e);
-      showStatus("Network Error: Not Saved!", true);
-      return false;
+      showStatus("Save Error!", true);
+      resolve(false);
     }
-  }
+  });
 }
 
-// JSONP Callback - গুগল শিট থেকে ডাটা আসার পর
+// JSONP Callback - গুগল শিট থেকে ডাটা লোড হওয়ার পর
 window.handleSheetDataResponse = function(textData) {
   if (textData && String(textData).trim() !== "") {
     try {
@@ -115,7 +100,7 @@ window.handleSheetDataResponse = function(textData) {
   }
 };
 
-// Google Sheets থেকে ডাটা লোড
+// Google Sheets থেকে ডাটা লোড (JSONP)
 function loadFromGoogleSheet() {
   showStatus("Loading data from Google Sheets...");
   const oldScript = document.getElementById("jsonpScript");
@@ -221,6 +206,8 @@ function additionalInfo(){
   if(input) input.addEventListener("input",()=>input.value=titleCaseText(input.value));
   const search=document.querySelector('.additionalSearch[data-searchfield="'+k+'"]'); 
   if(search) search.addEventListener("input",()=>filterAdditionalValues(k,search.value));
+  const expBtn=document.querySelector('.additionalExport[data-exportfield="'+k+'"]');
+  if(expBtn) expBtn.onclick=()=>exportAdditionalExcel(k);
  });
 
  content.querySelectorAll(".addInfoBtn").forEach(b=>{
@@ -332,6 +319,7 @@ function entry(t){
  const content = document.getElementById("content");
  if(!content) return;
  content.innerHTML='<div class="entryPage"><div class="panel entryFormPanel"><h2>'+titles[t]+'</h2>'+'<form id="f" class="form">'+fs.map(f=>'<div class="field '+(f[0]==="remarks"?"wide":"")+'"><label>'+f[1]+'</label>'+fieldHTML(f)+'</div>').join("")+'<div class="actions"><button class="btn">Save</button></div></form></div><div class="panel entryDataPanel"><div class="exportBar"><input id="entrySearch" class="tableSearch" placeholder="Search..." autocomplete="off"><button class="btn" id="entrySearchBtn">Search</button><button class="btn" id="entryClearBtn">Clear</button><button class="btn exportBtn" id="entryExport">Download Excel</button></div><div id="tbl"></div></div></div>';
+ 
  const form=document.getElementById("f");
  if(form){
    form.onsubmit=async e=>{
@@ -348,6 +336,10 @@ function entry(t){
     entry(t);
    };
  }
+
+ // Bind Search, Clear, and Export Buttons
+ bindTableTools("entryTable", "entrySearch", "entrySearchBtn", "entryClearBtn", "entryExport", titles[t]);
+
  renderTable(t);
 }
 
@@ -376,11 +368,69 @@ function renderTable(t){
  }
 }
 
+// 🔍 Search, Clear & 📊 Excel Export Engine
+function bindTableTools(tableId, searchInputId, searchBtnId, clearBtnId, exportBtnId, exportFileName){
+ setTimeout(()=>{
+  const input=document.getElementById(searchInputId);
+  const searchBtn=document.getElementById(searchBtnId);
+  const clearBtn=document.getElementById(clearBtnId);
+  const exportBtn=document.getElementById(exportBtnId);
+
+  const filterTable=()=>{
+   const query=String(input?.value||"").trim().toLowerCase();
+   const table=document.getElementById(tableId);
+   if(!table) return;
+   const rows=table.querySelectorAll("tbody tr");
+   rows.forEach(tr=>{
+    const text=tr.textContent.toLowerCase();
+    tr.style.display=text.includes(query)?"":"none";
+   });
+   const subCols = table.dataset.subtotalCols ? table.dataset.subtotalCols.split(",").map(Number) : [];
+   if(subCols.length) updateTableSubtotals(tableId, subCols);
+  };
+
+  if(input) input.onkeyup = filterTable;
+  if(searchBtn) searchBtn.onclick = filterTable;
+  if(clearBtn) clearBtn.onclick = ()=>{ if(input) input.value=""; filterTable(); };
+  if(exportBtn) exportBtn.onclick = ()=> exportTableToExcel(tableId, exportFileName);
+ }, 50);
+}
+
+function exportTableToExcel(tableId, filename){
+ const table=document.getElementById(tableId);
+ if(!table || typeof XLSX === "undefined"){ alert("Excel Exporter Library Not Ready!"); return; }
+ const clone=table.cloneNode(true);
+ clone.querySelectorAll(".rowEdit, .rowDelete, th:last-child, td:last-child").forEach(e=>e.remove());
+ const wb=XLSX.utils.table_to_book(clone, {sheet:"Data"});
+ XLSX.writeFile(wb, (filename||"ERP_Export")+".xlsx");
+}
+
+function exportAdditionalExcel(field){
+ const vals = allTextValues(field);
+ if(!vals.length){ alert("No data to export!"); return; }
+ if(typeof XLSX === "undefined"){ alert("Excel Exporter Library Not Ready!"); return; }
+ const data = vals.map(v=>({ [field.toUpperCase()]: v }));
+ const ws = XLSX.utils.json_to_sheet(data);
+ const wb = XLSX.utils.book_new();
+ XLSX.utils.book_append_sheet(wb, ws, "Additional_Info");
+ XLSX.writeFile(wb, field+"_list.xlsx");
+}
+
 function formatQty(x){const n=Number(x);return Number.isFinite(n)?n.toFixed(2):"0.00"}
+
 function updateTableSubtotals(tableId,qtyCols){
  const table=document.getElementById(tableId);if(!table)return;const totals={};qtyCols.forEach(i=>totals[i]=0);
- table.querySelectorAll("tbody tr").forEach(tr=>{if(tr.style.display==="none")return;qtyCols.forEach(i=>{const n=parseFloat(String(tr.cells[i]?.textContent||"").replace(/,/g,""));if(Number.isFinite(n))totals[i]+=n})});
- qtyCols.forEach(i=>{const c=table.querySelector('tfoot [data-subtotal-col="'+i+'"]');if(c)c.textContent=formatQty(totals[i])});
+ table.querySelectorAll("tbody tr").forEach(tr=>{
+  if(tr.style.display==="none")return;
+  qtyCols.forEach(i=>{
+   const n=parseFloat(String(tr.cells[i]?.textContent||"").replace(/,/g,""));
+   if(Number.isFinite(n))totals[i]+=n;
+  });
+ });
+ qtyCols.forEach(i=>{
+  const c=table.querySelector('tfoot [data-subtotal-col="'+i+'"]');
+  if(c)c.textContent=formatQty(totals[i]);
+ });
 }
 
 function editRow(t,id){let r=D[t].find(x=>String(x.id)===String(id));if(!r)return;edit[t]=r.id;F[t].forEach(f=>{let e=document.querySelector('[name="'+f[0]+'"]');if(e)e.value=r[f[0]]||""})}
@@ -394,30 +444,34 @@ document.addEventListener("click",e=>{
 });
 
 const STOCK_RECEIVE={
- raw:new Set(["GREY YARN RECEIVED FROM SPINNING","GREY YARN RETURN FROM DYEING","GREY YARN RETURN FROM KNITTING","GREY YARN RETURN FROM RE-CONNING"]),
+ raw:new Set(["RAW YARN RECEIVED FROM SPINNING","RAW YARN RETURN FROM DYEING","RAW YARN RETURN FROM KNITTING","RAW YARN RETURN FROM RE-CONNING"]),
  dyed:new Set(["DYED YARN RECEIVED FROM DYEING","DYED YARN RETURN FROM KNITTING","DYED YARN RETURN FROM RE-CONNING"]),
  grey:new Set(["GREY FABRICS RECEIVED FROM KNITTING","GREY FABRICS RETURN FROM DYEING"]),
  loose:new Set(["LOOSE YARN RECEIVED FORM KNITTING"])
 };
 const STOCK_DELIVERY={
- raw:new Set(["GREY YARN DELIVERY TO SPINNING","GREY YARN DELIVERY TO DYEING","GREY YARN DELIVERY TO KNITTING","GREY YARN DELIVERY TO RE-CONNING","GREY YARN SALE"]),
+ raw:new Set(["RAW YARN DELIVERY TO SPINNING","RAW YARN DELIVERY TO DYEING","RAW YARN DELIVERY TO KNITTING","RAW YARN DELIVERY TO RE-CONNING","RAW YARN SALE"]),
  dyed:new Set(["DYED YARN DELIVERY TO DYEING","DYED YARN DELIVERY TO KINTTING","DYED YARN DELIVERY TO RE-CONNING","DYED YARN SALE"]),
  grey:new Set(["GREY FABRICS DELIVERY TO KNITTING","GREY FABRICS DELIVERY TO DYEING","GREY FABRIC SALE"]),
  loose:new Set(["LOOSE YARN SALE"])
 };
+
 function stockType(t,tr){const x=String(tr||"").trim().toUpperCase();if(STOCK_RECEIVE[t] && STOCK_RECEIVE[t].has(x))return "received";if(STOCK_DELIVERY[t] && STOCK_DELIVERY[t].has(x))return "delivered";return ""}
+
 function stockFields(t){
  if(t==="raw")return ["category","proformaInvoice","sourceBuyer","sourceOrder","yarnBrand","lot","count","fiver","blandRatio","quality","color"];
  if(t==="dyed")return ["category","workOrder","buyer","order","dyeingFactory","batch","count","fiver","blandRatio","quality","color"];
  if(t==="loose")return ["category","yknc","buyer","order","yarnBrand","lot","count","fiver","blandRatio","quality","color"];
  return ["category","yknc","buyer","order","knittingFactory","fabrication","gsm","mcD","fd","color"];
 }
+
 function primaryReceivedTransaction(t){
- if(t==="raw")return "GREY YARN RECEIVED FROM SPINNING";
+ if(t==="raw")return "RAW YARN RECEIVED FROM SPINNING";
  if(t==="dyed")return "DYED YARN RECEIVED FROM DYEING";
  if(t==="loose")return "LOOSE YARN RECEIVED FORM KNITTING";
  return "GREY FABRICS RECEIVED FROM KNITTING";
 }
+
 function groups(t){
  const fs=stockFields(t),m={},primaryReceive=primaryReceivedTransaction(t);
  const list = Array.isArray(D[t]) ? D[t] : [];
@@ -437,7 +491,7 @@ function groups(t){
 function dash(){
  const cards=[["Raw Yarn Stock","raw"],["Dyed Yarn Stock","dyed"],["Grey Fabrics Stock","grey"],["Loose Yarn Stock","loose"]];
  const rawGroups=groups("raw"),rawTotal=rawGroups.reduce((a,z)=>a+z.balance,0);
- const rawCats=["Grey Yarn","Lycra Yarn","Polyester Yarn"].map(cat=>{const total=rawGroups.filter(z=>String(z.r.category||"").trim().toLowerCase()===cat.toLowerCase()).reduce((a,z)=>a+z.balance,0);return '<div class="rawCategoryStock"><span>'+cat+'</span><strong>'+total.toFixed(2)+'</strong></div>'}).join("");
+ const rawCats=["Grey Yarn","Lycra Yarn","Polyester Yarn"].map(cat=>{const total=rawGroups.filter(z=>String(z.r.category||"").trim().toLowerCase()===cat.toLowerCase()).reduce((a,z)=>a+z.balance,0);return '<div class="rawCategoryStock"><span>'+cat+'</span><strong>'+total.toFixed(2)+' KG</strong></div>'}).join("");
  const content = document.getElementById("content");
  if(!content) return;
  content.innerHTML='<div class="cards"><div class="card rawStockCard" onclick="go(\'stock\',\'raw\')"><b>Raw Yarn Stock</b><strong>'+rawTotal.toFixed(2)+' KG</strong><div class="rawCategoryList">'+rawCats+'</div></div>'+cards.slice(1).map(x=>'<div class="card" onclick="go(\'stock\',\''+x[1]+'\')"><b>'+x[0]+'</b><strong>'+groups(x[1]).reduce((a,z)=>a+z.balance,0).toFixed(2)+' KG</strong></div>').join("")+'</div>';
@@ -452,27 +506,78 @@ function stockMenu(){
 function stock(t){
  setPageState("stock",t);
  const fs=stockFields(t),rs=groups(t),title={raw:"Raw Yarn Stock",dyed:"Dyed Yarn Stock",grey:"Grey Fabrics Stock",loose:"Loose Yarn Stock"}[t];
- const sv = document.getElementById("sv");
- if(!sv) return;
- sv.innerHTML='<div class="exportBar"><input id="stockSearch" class="tableSearch" placeholder="Search..." autocomplete="off"><button class="btn" id="stockSearchBtn">Search</button><button class="btn" id="stockClearBtn">Clear</button><button class="btn exportBtn" id="stockExport">Download Excel</button></div><h2>'+title+'</h2><div class="tableWrap dataScroll"><table id="stockTable"><thead><tr><th>Received Date</th>'+fs.map(x=>'<th>'+titleCaseText(x)+'</th>').join("")+'<th>Total Received</th><th>Total Delivery</th><th>Balance</th></tr></thead><tbody>'+rs.map(x=>'<tr><td>'+esc(x.receivedDate||"")+'</td>'+fs.map(k=>'<td>'+esc(x.r[k])+'</td>').join("")+'<td>'+formatQty(x.received)+'</td><td>'+formatQty(x.delivery)+'</td><td>'+formatQty(x.balance)+'</td></tr>').join("")+'</tbody><tfoot><tr class="subtotalRow"><td>Subtotal</td>'+fs.map(()=>'<td></td>').join("")+'<td data-subtotal-col="'+(fs.length+1)+'">0.00</td><td data-subtotal-col="'+(fs.length+2)+'">0.00</td><td data-subtotal-col="'+(fs.length+3)+'">0.00</td></tr></tfoot></table></div>';
+ const content = document.getElementById("content");
+ if(!content) return;
+ content.innerHTML='<div class="choices"><button class="choice" onclick="go(\'stock\',\'raw\')">Raw Yarn Stock</button><button class="choice" onclick="go(\'stock\',\'dyed\')">Dyed Yarn Stock</button><button class="choice" onclick="go(\'stock\',\'grey\')">Grey Fabrics Stock</button><button class="choice" onclick="go(\'stock\',\'loose\')">Loose Yarn Stock</button></div><div class="panel" id="sv"><div class="exportBar"><input id="stockSearch" class="tableSearch" placeholder="Search..." autocomplete="off"><button class="btn" id="stockSearchBtn">Search</button><button class="btn" id="stockClearBtn">Clear</button><button class="btn exportBtn" id="stockExport">Download Excel</button></div><h2>'+title+'</h2><div class="tableWrap dataScroll"><table id="stockTable"><thead><tr><th>Received Date</th>'+fs.map(x=>'<th>'+titleCaseText(x)+'</th>').join("")+'<th>Total Received</th><th>Total Delivery</th><th>Balance</th></tr></thead><tbody>'+rs.map(x=>'<tr><td>'+esc(x.receivedDate||"")+'</td>'+fs.map(k=>'<td>'+esc(x.r[k])+'</td>').join("")+'<td>'+formatQty(x.received)+'</td><td>'+formatQty(x.delivery)+'</td><td>'+formatQty(x.balance)+'</td></tr>').join("")+'</tbody><tfoot><tr class="subtotalRow"><td>Subtotal</td>'+fs.map(()=>'<td></td>').join("")+'<td data-subtotal-col="'+(fs.length+1)+'">0.00</td><td data-subtotal-col="'+(fs.length+2)+'">0.00</td><td data-subtotal-col="'+(fs.length+3)+'">0.00</td></tr></tfoot></table></div></div>';
+ 
  const stockTable = document.getElementById("stockTable");
  if(stockTable){
    stockTable.dataset.subtotalCols=[fs.length+1,fs.length+2,fs.length+3].join(",");
    updateTableSubtotals("stockTable",[fs.length+1,fs.length+2,fs.length+3]);
  }
+ bindTableTools("stockTable", "stockSearch", "stockSearchBtn", "stockClearBtn", "stockExport", title);
 }
 
 function statementMenu(sub=""){
  const content = document.getElementById("content");
  if(!content) return;
  content.innerHTML='<div class="choices"><button class="choice" onclick="go(\'statements\',\'dyeing\')">Dyeing Statement</button><button class="choice" onclick="go(\'statements\',\'knitting\')">Knitting Statement</button><button class="choice" onclick="go(\'statements\',\'reqDyeing\')">Requirement Statement (Dyeing)</button><button class="choice" onclick="go(\'statements\',\'reqKnitting\')">Requirement Statement (Knitting)</button></div><div class="panel" id="st">Select Statement.</div>';
- if(sub&&["dyeing","knitting","reqDyeing","reqKnitting"].includes(sub))statement(sub);
+ if(sub&&["dyeing","knitting","reqDyeing","reqKnitting"].includes(sub)) statement(sub);
+}
+
+function statement(sub){
+ setPageState("statements",sub);
+ const stBox = document.getElementById("st");
+ if(!stBox) return;
+
+ let title = "", data = [];
+ if(sub==="dyeing"){ title="Dyeing Statement"; data=D.dyed; }
+ else if(sub==="knitting"){ title="Knitting Statement"; data=D.grey; }
+ else if(sub==="reqDyeing"){ title="Requirement Statement (Dyeing)"; data=D.reqDyeing; }
+ else if(sub==="reqKnitting"){ title="Requirement Statement (Knitting)"; data=D.reqKnitting; }
+
+ const fs = F[sub==="dyeing"?"dyed":(sub==="knitting"?"grey":(sub==="reqDyeing"?"reqDyeing":"reqKnitting"))] || [];
+ const qi = fs.findIndex(f=>f[0]==="quantity");
+
+ stBox.innerHTML='<div class="exportBar"><input id="stSearch" class="tableSearch" placeholder="Search..." autocomplete="off"><button class="btn" id="stSearchBtn">Search</button><button class="btn" id="stClearBtn">Clear</button><button class="btn exportBtn" id="stExport">Download Excel</button></div><h2>'+title+'</h2><div class="tableWrap dataScroll"><table id="stTable"><thead><tr>'+fs.map(f=>'<th>'+titleCaseText(f[1])+'</th>').join("")+'</tr></thead><tbody>'+[...data].reverse().map(r=>'<tr>'+fs.map(f=>'<td>'+esc(f[0]==="quantity"?formatQty(r[f[0]]):r[f[0]])+'</td>').join("")+'</tr>').join("")+'</tbody><tfoot><tr class="subtotalRow">'+fs.map((f,i)=>'<td data-subtotal-col="'+i+'">'+(i===0?"Subtotal":(i===qi?"0.00":""))+'</td>').join("")+'</tr></tfoot></table></div>';
+
+ const stTable = document.getElementById("stTable");
+ if(stTable && qi!==-1){
+   stTable.dataset.subtotalCols = String(qi);
+   updateTableSubtotals("stTable", [qi]);
+ }
+ bindTableTools("stTable", "stSearch", "stSearchBtn", "stClearBtn", "stExport", title);
 }
 
 function backupRestoreMenu(){
  const content = document.getElementById("content");
  if(!content) return;
  content.innerHTML='<div class="panel"><h2>Backup & Restore</h2><div class="backupGrid"><div class="backupCard"><h3>JSON Backup / Restore</h3><button class="btn backupAction" onclick="sagFullJsonBackup()">Full JSON Backup</button> <button class="btn backupAction secondary" onclick="document.getElementById(\'sagJsonRestore\').click()">Full JSON Restore</button><input id="sagJsonRestore" type="file" accept=".json,application/json" style="display:none" onchange="sagFullJsonRestore(this)"></div></div></div>';
+}
+
+function sagFullJsonBackup(){
+ const blob=new Blob([JSON.stringify(D,null,2)],{type:"application/json"});
+ const a=document.createElement("a");
+ a.href=URL.createObjectURL(blob);
+ a.download="SAG_ERP_BACKUP_"+new Date().toISOString().slice(0,10)+".json";
+ a.click();
+}
+
+function sagFullJsonRestore(input){
+ const file=input.files[0];
+ if(!file) return;
+ const reader=new FileReader();
+ reader.onload=async e=>{
+  try{
+   const parsed=JSON.parse(e.target.result);
+   D=normalizeRestoredERP(parsed);
+   postLoadProcess();
+   await save();
+   alert("Restore Successful!");
+   location.reload();
+  }catch(err){ alert("Invalid Backup File!"); }
+ };
+ reader.readAsText(file);
 }
 
 window.addEventListener("load", () => {
