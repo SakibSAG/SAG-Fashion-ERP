@@ -39,7 +39,7 @@ function showStatus(message, isError = false) {
   }
 }
 
-// Google Sheets-এ ডাটা সেভ করার নির্ভুল উপায়
+// Google Sheets-এ ডাটা সেভ করার উপায়
 function saveToGoogleSheet() {
   showStatus("Saving to Google Sheets...");
   return new Promise((resolve) => {
@@ -337,10 +337,8 @@ function entry(t){
    };
  }
 
- // Bind Search, Clear, and Export Buttons
- bindTableTools("entryTable", "entrySearch", "entrySearchBtn", "entryClearBtn", "entryExport", titles[t]);
-
  renderTable(t);
+ bindTableTools("entryTable", "entrySearch", "entrySearchBtn", "entryClearBtn", "entryExport", titles[t]);
 }
 
 function fieldHTML(f){
@@ -368,7 +366,6 @@ function renderTable(t){
  }
 }
 
-// 🔍 Search, Clear & 📊 Excel Export Engine
 function bindTableTools(tableId, searchInputId, searchBtnId, clearBtnId, exportBtnId, exportFileName){
  setTimeout(()=>{
   const input=document.getElementById(searchInputId);
@@ -443,6 +440,7 @@ document.addEventListener("click",e=>{
  if(delBtn){delRow(delBtn.dataset.key,delBtn.dataset.id);return}
 });
 
+// 📌 Corrected Stock Receive & Delivery Definitions (Matching Entry Options Exact Strings)
 const STOCK_RECEIVE={
  raw:new Set(["RAW YARN RECEIVED FROM SPINNING","RAW YARN RETURN FROM DYEING","RAW YARN RETURN FROM KNITTING","RAW YARN RETURN FROM RE-CONNING"]),
  dyed:new Set(["DYED YARN RECEIVED FROM DYEING","DYED YARN RETURN FROM KNITTING","DYED YARN RETURN FROM RE-CONNING"]),
@@ -452,11 +450,16 @@ const STOCK_RECEIVE={
 const STOCK_DELIVERY={
  raw:new Set(["RAW YARN DELIVERY TO SPINNING","RAW YARN DELIVERY TO DYEING","RAW YARN DELIVERY TO KNITTING","RAW YARN DELIVERY TO RE-CONNING","RAW YARN SALE"]),
  dyed:new Set(["DYED YARN DELIVERY TO DYEING","DYED YARN DELIVERY TO KINTTING","DYED YARN DELIVERY TO RE-CONNING","DYED YARN SALE"]),
- grey:new Set(["GREY FABRICS DELIVERY TO KNITTING","GREY FABRICS DELIVERY TO DYEING","GREY FABRIC SALE"]),
+ grey:new Set(["GREY FABRICS DELIVERY TO KNITTING","GREY FABRICS DELIVERY TO DYEING","GREY FABRICS SALE"]),
  loose:new Set(["LOOSE YARN SALE"])
 };
 
-function stockType(t,tr){const x=String(tr||"").trim().toUpperCase();if(STOCK_RECEIVE[t] && STOCK_RECEIVE[t].has(x))return "received";if(STOCK_DELIVERY[t] && STOCK_DELIVERY[t].has(x))return "delivered";return ""}
+function stockType(t,tr){
+ const x=String(tr||"").trim().toUpperCase();
+ if(STOCK_RECEIVE[t] && STOCK_RECEIVE[t].has(x)) return "received";
+ if(STOCK_DELIVERY[t] && STOCK_DELIVERY[t].has(x)) return "delivered";
+ return "";
+}
 
 function stockFields(t){
  if(t==="raw")return ["category","proformaInvoice","sourceBuyer","sourceOrder","yarnBrand","lot","count","fiver","blandRatio","quality","color"];
@@ -491,7 +494,11 @@ function groups(t){
 function dash(){
  const cards=[["Raw Yarn Stock","raw"],["Dyed Yarn Stock","dyed"],["Grey Fabrics Stock","grey"],["Loose Yarn Stock","loose"]];
  const rawGroups=groups("raw"),rawTotal=rawGroups.reduce((a,z)=>a+z.balance,0);
- const rawCats=["Grey Yarn","Lycra Yarn","Polyester Yarn"].map(cat=>{const total=rawGroups.filter(z=>String(z.r.category||"").trim().toLowerCase()===cat.toLowerCase()).reduce((a,z)=>a+z.balance,0);return '<div class="rawCategoryStock"><span>'+cat+'</span><strong>'+total.toFixed(2)+' KG</strong></div>'}).join("");
+ const rawCats=["Grey Yarn","Lycra Yarn","Polyester Yarn"].map(cat=>{
+   const total=rawGroups.filter(z=>String(z.r.category||"").trim().toLowerCase()===cat.toLowerCase()).reduce((a,z)=>a+z.balance,0);
+   return '<div class="rawCategoryStock"><span>'+cat+'</span><strong>'+total.toFixed(2)+' KG</strong></div>';
+ }).join("");
+ 
  const content = document.getElementById("content");
  if(!content) return;
  content.innerHTML='<div class="cards"><div class="card rawStockCard" onclick="go(\'stock\',\'raw\')"><b>Raw Yarn Stock</b><strong>'+rawTotal.toFixed(2)+' KG</strong><div class="rawCategoryList">'+rawCats+'</div></div>'+cards.slice(1).map(x=>'<div class="card" onclick="go(\'stock\',\''+x[1]+'\')"><b>'+x[0]+'</b><strong>'+groups(x[1]).reduce((a,z)=>a+z.balance,0).toFixed(2)+' KG</strong></div>').join("")+'</div>';
