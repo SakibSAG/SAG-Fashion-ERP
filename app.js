@@ -21,7 +21,6 @@ if(!requirePassword()) throw new Error("ERP locked");
 
 const ADDITIONAL_FIELDS=["proformaInvoice","sourceBuyer","sourceOrder","buyer","order","customer","yarnBrand","lot","count","fiver","blandRatio","quality","color","workOrder","dyeingFactory","batch","yknc","knittingFactory","fabrication","gsm","mcD","fd"];
 
-// Default Data Structure Initializer
 function createEmptyDataStructure() {
   const initAdd = {};
   ADDITIONAL_FIELDS.forEach(k => initAdd[k] = []);
@@ -30,28 +29,6 @@ function createEmptyDataStructure() {
 
 let D = createEmptyDataStructure();
 let edit = {};
-
-// Google Identity Services Setup
-function initGoogleAuth() {
-  if (typeof google !== "undefined" && google.accounts) {
-    tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID,
-      scope: SCOPES,
-      callback: async (tokenResponse) => {
-        if (tokenResponse.access_token) {
-          accessToken = tokenResponse.access_token;
-          showStatus("Google Sheets Connected! Loading data...");
-          await loadFromGoogleSheet();
-        } else {
-          showStatus("Google Authentication Failed!", true);
-        }
-      },
-    });
-    tokenClient.requestAccessToken({ prompt: '' });
-  } else {
-    setTimeout(initGoogleAuth, 500);
-  }
-}
 
 // UI Status Message
 function showStatus(message, isError = false) {
@@ -70,6 +47,28 @@ function showStatus(message, isError = false) {
   }
 }
 
+// Google Auth Init
+function initGoogleAuth() {
+  if (typeof google !== "undefined" && google.accounts) {
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID,
+      scope: SCOPES,
+      callback: async (tokenResponse) => {
+        if (tokenResponse.access_token) {
+          accessToken = tokenResponse.access_token;
+          showStatus("Google Sheets Connected! Syncing data...");
+          await loadFromGoogleSheet();
+        } else {
+          showStatus("Google Auth Permission Pending", true);
+        }
+      },
+    });
+    tokenClient.requestAccessToken({ prompt: '' });
+  } else {
+    setTimeout(initGoogleAuth, 500);
+  }
+}
+
 // Load Data from Google Sheet
 async function loadFromGoogleSheet() {
   try {
@@ -82,23 +81,23 @@ async function loadFromGoogleSheet() {
       const parsedData = JSON.parse(result.values[0][0]);
       D = normalizeRestoredERP(parsedData);
       postLoadProcess();
-      showStatus("Data Loaded Successfully!");
-      go(getPageState().page, getPageState().sub);
+      showStatus("Data Synced from Google Sheets!");
+      const curr = getPageState();
+      go(curr.page, curr.sub);
     } else {
-      showStatus("No existing data found in Sheet. Initialized empty database.");
-      postLoadProcess();
-      go(getPageState().page, getPageState().sub);
+      showStatus("Google Sheet is empty. Ready for new entries.");
     }
   } catch (err) {
     console.error("Error loading data from Google Sheet:", err);
-    showStatus("Failed to load data from Google Sheets!", true);
+    showStatus("Cloud load failed! Local state active.", true);
   }
 }
 
 // Save Data to Google Sheet
 async function saveToGoogleSheet() {
   if (!accessToken) {
-    alert("Google Drive access token missing. Please refresh.");
+    showStatus("Connecting Google Auth...", true);
+    initGoogleAuth();
     return false;
   }
   showStatus("Saving to Google Sheets...");
@@ -122,12 +121,12 @@ async function saveToGoogleSheet() {
     } else {
       const errRes = await response.json();
       console.error("Save Error Response:", errRes);
-      showStatus("Save Failed! Check Permissions.", true);
+      showStatus("Save Failed! Check Google Sheet Permissions.", true);
       return false;
     }
   } catch (err) {
     console.error("Error saving data to Google Sheet:", err);
-    showStatus("Network Error: Data Not Saved!", true);
+    showStatus("Network Error: Not Saved to Cloud!", true);
     return false;
   }
 }
@@ -225,17 +224,14 @@ function additionalInfo(){
    if(!v){alert("Please Enter A Value.");return;}
    
    if(!Array.isArray(D.additional[k])) D.additional[k] = [];
-   
    if(!D.additional[k].includes(v)){
      D.additional[k].push(v);
    }
    D.additional[k] = [...new Set(D.additional[k])];
    
-   const isSaved = await save();
-   if(isSaved){
-     input.value = "";
-     additionalInfo();
-   }
+   await save();
+   input.value = "";
+   additionalInfo();
   };
  });
 
@@ -301,13 +297,31 @@ function getPageState(){
  try{const x=JSON.parse(sessionStorage.getItem(PAGE_STATE_KEY)||"");if(x&&titles[x.page])return x}catch(e){}
  return {page:"dashboard",sub:""}
 }
+
 function go(p,sub=""){
- setPageState(p,sub); document.getElementById("title").textContent=titles[p];
- if(p==="dashboard")dash(); else if(p==="additional")additionalInfo(); else if(["raw","dyed","grey","loose","reqDyeing","reqKnitting"].includes(p))entry(p);
+ setPageState(p,sub); 
+ const titleElem = document.getElementById("title");
+ if(titleElem) titleElem.textContent=titles[p];
+ if(p==="dashboard")dash(); 
+ else if(p==="additional")additionalInfo(); 
+ else if(["raw","dyed","grey","loose","reqDyeing","reqKnitting"].includes(p))entry(p);
  else if(p==="stock"){if(sub&&["raw","dyed","grey","loose"].includes(sub))stock(sub);else stockMenu()}
- else if(p==="backup")backupRestoreMenu(); else statementMenu(sub);
+ else if(p==="backup")backupRestoreMenu(); 
+ else statementMenu(sub);
 }
-nav.forEach(([p,t])=>{let b=document.createElement("button");b.textContent=t;b.onclick=()=>go(p);document.getElementById("nav").appendChild(b)});
+
+// Render Navigation Bar Items
+function renderNav() {
+ const navContainer = document.getElementById("nav");
+ if(!navContainer) return;
+ navContainer.innerHTML = "";
+ nav.forEach(([p,t])=>{
+   let b=document.createElement("button");
+   b.textContent=t;
+   b.onclick=()=>go(p);
+   navContainer.appendChild(b);
+ });
+}
 
 function entry(t){
  let fs=F[t];
@@ -324,10 +338,8 @@ function entry(t){
   o.id=edit[t]||Date.now();
   D[t]=edit[t]?D[t].map(x=>x.id==o.id?o:x):[...D[t],o]; delete edit[t]; 
   
-  const success = await save();
-  if (success) {
-    entry(t);
-  }
+  await save();
+  entry(t);
  };
  renderTable(t);
 }
@@ -347,6 +359,7 @@ function fieldHTML(f){
 function renderTable(t){
  let fs=F[t],qi=fs.findIndex(f=>f[0]==="quantity");
  const tbl = document.getElementById("tbl");
+ if(!tbl) return;
  tbl.innerHTML='<div class="tableWrap dataScroll"><table id="entryTable"><thead><tr>'+fs.map(f=>'<th>'+titleCaseText(f[1])+'</th>').join("")+'<th>Actions</th></tr></thead><tbody>'+[...D[t]].reverse().map(r=>'<tr>'+fs.map(f=>'<td>'+esc(f[0]==="quantity"?formatQty(r[f[0]]):r[f[0]])+'</td>').join("")+'<td><button type="button" class="btn rowEdit" data-key="'+esc(t)+'" data-id="'+esc(String(r.id))+'">Edit</button> <button type="button" class="btn del rowDelete" data-key="'+esc(t)+'" data-id="'+esc(String(r.id))+'">Delete</button></td></tr>').join("")+'</tbody><tfoot><tr class="subtotalRow">'+fs.map((f,i)=>'<td data-subtotal-col="'+i+'">'+(i===0?"Subtotal":(i===qi?"0.00":""))+'</td>').join("")+'<td></td></tr></tfoot></table></div>';
  document.getElementById("entryTable").dataset.subtotalCols=String(qi); updateTableSubtotals("entryTable",[qi]);
 }
@@ -368,14 +381,18 @@ document.addEventListener("click",e=>{
  if(delBtn){delRow(delBtn.dataset.key,delBtn.dataset.id);return}
 });
 
-function dash(){
- const cards=[["Raw Yarn Stock","raw"],["Dyed Yarn Stock","dyed"],["Grey Fabrics Stock","grey"],["Loose Yarn Stock","loose"]];
- const rawGroups=groups("raw"),rawTotal=rawGroups.reduce((a,z)=>a+z.balance,0);
- const rawCats=["Grey Yarn","Lycra Yarn","Polyester Yarn"].map(cat=>{const total=rawGroups.filter(z=>String(z.r.category||"").trim().toLowerCase()===cat.toLowerCase()).reduce((a,z)=>a+z.balance,0);return '<div class="rawCategoryStock"><span>'+cat+'</span><strong>'+total.toFixed(2)+'</strong></div>'}).join("");
- const content = document.getElementById("content");
- content.innerHTML='<div class="cards"><div class="card rawStockCard" onclick="go(\'stock\',\'raw\')"><b>Raw Yarn Stock</b><strong>'+rawTotal.toFixed(2)+' KG</strong><div class="rawCategoryList">'+rawCats+'</div></div>'+cards.slice(1).map(x=>'<div class="card" onclick="go(\'stock\',\''+x[1]+'\')"><b>'+x[0]+'</b><strong>'+groups(x[1]).reduce((a,z)=>a+z.balance,0).toFixed(2)+' KG</strong></div>').join("")+'</div>';
-}
-
+const STOCK_RECEIVE={
+ raw:new Set(["GREY YARN RECEIVED FROM SPINNING","GREY YARN RETURN FROM DYEING","GREY YARN RETURN FROM KNITTING","GREY YARN RETURN FROM RE-CONNING"]),
+ dyed:new Set(["DYED YARN RECEIVED FROM DYEING","DYED YARN RETURN FROM KNITTING","DYED YARN RETURN FROM RE-CONNING"]),
+ grey:new Set(["GREY FABRICS RECEIVED FROM KNITTING","GREY FABRICS RETURN FROM DYEING"]),
+ loose:new Set(["LOOSE YARN RECEIVED FORM KNITTING"])
+};
+const STOCK_DELIVERY={
+ raw:new Set(["GREY YARN DELIVERY TO SPINNING","GREY YARN DELIVERY TO DYEING","GREY YARN DELIVERY TO KNITTING","GREY YARN DELIVERY TO RE-CONNING","GREY YARN SALE"]),
+ dyed:new Set(["DYED YARN DELIVERY TO DYEING","DYED YARN DELIVERY TO KINTTING","DYED YARN DELIVERY TO RE-CONNING","DYED YARN SALE"]),
+ grey:new Set(["GREY FABRICS DELIVERY TO KNITTING","GREY FABRICS DELIVERY TO DYEING","GREY FABRIC SALE"]),
+ loose:new Set(["LOOSE YARN SALE"])
+};
 function stockType(t,tr){const x=String(tr||"").trim().toUpperCase();if(STOCK_RECEIVE[t].has(x))return "received";if(STOCK_DELIVERY[t].has(x))return "delivered";return ""}
 function stockFields(t){
  if(t==="raw")return ["category","proformaInvoice","sourceBuyer","sourceOrder","yarnBrand","lot","count","fiver","blandRatio","quality","color"];
@@ -404,14 +421,24 @@ function groups(t){
  return Object.values(m).map(x=>({...x,r:{...x.r,receivedDate:x.receivedDate},balance:x.received+x.returnQty-x.delivery}));
 }
 
+function dash(){
+ const cards=[["Raw Yarn Stock","raw"],["Dyed Yarn Stock","dyed"],["Grey Fabrics Stock","grey"],["Loose Yarn Stock","loose"]];
+ const rawGroups=groups("raw"),rawTotal=rawGroups.reduce((a,z)=>a+z.balance,0);
+ const rawCats=["Grey Yarn","Lycra Yarn","Polyester Yarn"].map(cat=>{const total=rawGroups.filter(z=>String(z.r.category||"").trim().toLowerCase()===cat.toLowerCase()).reduce((a,z)=>a+z.balance,0);return '<div class="rawCategoryStock"><span>'+cat+'</span><strong>'+total.toFixed(2)+'</strong></div>'}).join("");
+ const content = document.getElementById("content");
+ content.innerHTML='<div class="cards"><div class="card rawStockCard" onclick="go(\'stock\',\'raw\')"><b>Raw Yarn Stock</b><strong>'+rawTotal.toFixed(2)+' KG</strong><div class="rawCategoryList">'+rawCats+'</div></div>'+cards.slice(1).map(x=>'<div class="card" onclick="go(\'stock\',\''+x[1]+'\')"><b>'+x[0]+'</b><strong>'+groups(x[1]).reduce((a,z)=>a+z.balance,0).toFixed(2)+' KG</strong></div>').join("")+'</div>';
+}
+
 function stockMenu(){
  const content = document.getElementById("content");
  content.innerHTML='<div class="choices"><button class="choice" onclick="go(\'stock\',\'raw\')">Raw Yarn Stock</button><button class="choice" onclick="go(\'stock\',\'dyed\')">Dyed Yarn Stock</button><button class="choice" onclick="go(\'stock\',\'grey\')">Grey Fabrics Stock</button><button class="choice" onclick="go(\'stock\',\'loose\')">Loose Yarn Stock</button></div><div class="panel" id="sv">Select Stock.</div>';
 }
+
 function stock(t){
  setPageState("stock",t);
  const fs=stockFields(t),rs=groups(t),title={raw:"Raw Yarn Stock",dyed:"Dyed Yarn Stock",grey:"Grey Fabrics Stock",loose:"Loose Yarn Stock"}[t];
  const sv = document.getElementById("sv");
+ if(!sv) return;
  sv.innerHTML='<div class="exportBar"><input id="stockSearch" class="tableSearch" placeholder="Search..." autocomplete="off"><button class="btn" id="stockSearchBtn">Search</button><button class="btn" id="stockClearBtn">Clear</button><button class="btn exportBtn" id="stockExport">Download Excel</button></div><h2>'+title+'</h2><div class="tableWrap dataScroll"><table id="stockTable"><thead><tr><th>Received Date</th>'+fs.map(x=>'<th>'+titleCaseText(x)+'</th>').join("")+'<th>Total Received</th><th>Total Delivery</th><th>Balance</th></tr></thead><tbody>'+rs.map(x=>'<tr><td>'+esc(x.receivedDate||"")+'</td>'+fs.map(k=>'<td>'+esc(x.r[k])+'</td>').join("")+'<td>'+formatQty(x.received)+'</td><td>'+formatQty(x.delivery)+'</td><td>'+formatQty(x.balance)+'</td></tr>').join("")+'</tbody><tfoot><tr class="subtotalRow"><td>Subtotal</td>'+fs.map(()=>'<td></td>').join("")+'<td data-subtotal-col="'+(fs.length+1)+'">0.00</td><td data-subtotal-col="'+(fs.length+2)+'">0.00</td><td data-subtotal-col="'+(fs.length+3)+'">0.00</td></tr></tfoot></table></div>';
  document.getElementById("stockTable").dataset.subtotalCols=[fs.length+1,fs.length+2,fs.length+3].join(",");
  updateTableSubtotals("stockTable",[fs.length+1,fs.length+2,fs.length+3]);
@@ -428,6 +455,11 @@ function backupRestoreMenu(){
  content.innerHTML='<div class="panel"><h2>Backup & Restore</h2><div class="backupGrid"><div class="backupCard"><h3>JSON Backup / Restore</h3><button class="btn backupAction" onclick="sagFullJsonBackup()">Full JSON Backup</button> <button class="btn backupAction secondary" onclick="document.getElementById(\'sagJsonRestore\').click()">Full JSON Restore</button><input id="sagJsonRestore" type="file" accept=".json,application/json" style="display:none" onchange="sagFullJsonRestore(this)"></div></div></div>';
 }
 
+// App Load & Start
 window.addEventListener("load", () => {
+  postLoadProcess();
+  renderNav();
+  const initPage = getPageState();
+  go(initPage.page, initPage.sub);
   initGoogleAuth();
 });
